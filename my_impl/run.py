@@ -1,12 +1,12 @@
 import numpy as np
-from utils import no_grad
-from functions import *
-from variable import Variable
+from dezero import *
 
+def matyas(x, y):
+    z = 0.26 * (x ** 2 + y ** 2) - 0.48 * x * y
+    return z
 
-a = Variable(np.array(3.0))
-b = Variable(np.array(2.0))
-
-print(a - b)
-print(a / b)
-print(a ** 3)
+x = Variable(np.array(1.0))
+y = Variable(np.array(1.0))
+z = matyas(x, y)
+z.backward()
+print(x.grad, y.grad)
