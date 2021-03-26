@@ -1,2 +1,2 @@
-from dezero.core_simple import *
+from dezero.core import *
 setup_variable()

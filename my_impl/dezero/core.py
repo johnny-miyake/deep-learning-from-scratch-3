@@ -53,9 +53,9 @@ class Variable:
     def cleargrad(self):
         self.grad = None
 
-    def backward(self, retain_grad=False):
+    def backward(self, retain_grad=False, create_graph=False):
         if self.grad is None:
-            self.grad = np.ones_like(self.data)
+            self.grad = Variable(np.ones_like(self.data))
 
         funcs = []
         seen_set = set()
@@ -71,22 +71,24 @@ class Variable:
         while funcs:
             f = funcs.pop()
             gys = [output().grad for output in f.outputs]
-            gxs = f.backward(*gys)
-            if not isinstance(gxs, tuple):
-                gxs = (gxs,)
 
-            for x, gx in zip(f.inputs, gxs):
-                if x.grad is None:
-                    x.grad = gx
-                else:
-                    x.grad = x.grad + gx
+            with using_config('enable_backprop', create_graph):
+                gxs = f.backward(*gys)
+                if not isinstance(gxs, tuple):
+                    gxs = (gxs,)
 
-                if x.creator is not None:
-                  add_func(x.creator)
+                for x, gx in zip(f.inputs, gxs):
+                    if x.grad is None:
+                        x.grad = gx
+                    else:
+                        x.grad = x.grad + gx
 
-            if not retain_grad:
-                for y in f.outputs:
-                    y().grad = None
+                    if x.creator is not None:
+                      add_func(x.creator)
+
+                if not retain_grad:
+                    for y in f.outputs:
+                        y().grad = None
 
 ################## DZFs ##################
 class Function:
@@ -150,7 +152,7 @@ class Mul(Function):
         return x0 * x1
 
     def backward(self, gy):
-        x0, x1 = self.inputs[0].data, self.inputs[1].data
+        x0, x1 = self.inputs
         return x1 * gy, x0 * gy
 
 class Div(Function):
@@ -158,7 +160,7 @@ class Div(Function):
         return x0 / x1
 
     def backward(self, gy):
-        x0, x1 = self.inputs[0].data, self.inputs[1].data
+        x0, x1 = self.inputs
         gx0 = gy * (1 / x1)
         gx1 = gy * -(x0 / x1 ** 2)
         return gx0, gx1
@@ -178,19 +180,9 @@ class Pow(Function):
         return x ** self.c
 
     def backward(self, gy):
-        x = self.inputs[0].data
+        x, = self.inputs
         c = self.c
         return c * x ** (c - 1) * gy
-
-class Sin(Function):
-    def forward(self, x):
-        y = np.sin(x)
-        return y
-
-    def backward(self, gy):
-        x = self.inputs[0].data
-        gx = gy * np.cos(x)
-        return gx
 
 ################## core functions ##################
 @contextlib.contextmanager
@@ -239,15 +231,11 @@ def rdiv(x0, x1):
     x1 = as_array(x1)
     return Div()(x1, x0)
 
-def neg(x0, x1):
-    x1 = as_array(x1)
+def neg(x):
     return Neg()(x)
 
 def pow(x, c):
     return Pow(c)(x)
-
-def sin(x):
-    return Sin()(x)
 
 def setup_variable():
     Variable.__mul__ = mul

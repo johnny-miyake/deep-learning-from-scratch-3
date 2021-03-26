@@ -1,12 +1,14 @@
 import numpy as np
-from dezero import *
+from dezero import Variable
+from dezero.utils import plot_dot_graph
+import dezero.functions as F
 
-def matyas(x, y):
-    z = 0.26 * (x ** 2 + y ** 2) - 0.48 * x * y
-    return z
+x = Variable(np.array(2.0))
+y = x ** 2
+y.backward(create_graph=True)
+gx = x.grad
+x.cleargrad()
 
-x = Variable(np.array(1.0))
-y = Variable(np.array(1.0))
-z = matyas(x, y)
+z = gx ** 3 + y
 z.backward()
-print(x.grad, y.grad)
+print(x.grad)
