@@ -3,9 +3,10 @@ from dezero import Variable
 from dezero.utils import plot_dot_graph
 import dezero.functions as F
 
-x = Variable(np.array([[1,2,3], [4,5,6]]))
-y = F.transpose(x)
-print(x.T)
+x0 = Variable(np.array([2,3,4]))
+x1 = Variable(np.array([3]))
+y = x0 + x1
 print(y)
-y.backward(retain_grad=True)
-print(x.grad)
+y.backward()
+print(x0.grad)
+print(x1.grad)
