@@ -1,12 +1,32 @@
-import numpy as np
 import weakref
+import numpy as np
 import contextlib
 
-################## Config ##################
+
+# =============================================================================
+# Config
+# =============================================================================
 class Config:
     enable_backprop = True
 
-################## Variable ##################
+
+@contextlib.contextmanager
+def using_config(name, value):
+    old_value = getattr(Config, name)
+    setattr(Config, name, value)
+    try:
+        yield
+    finally:
+        setattr(Config, name, old_value)
+
+
+def no_grad():
+    return using_config('enable_backprop', False)
+
+
+# =============================================================================
+# Variable / Function
+# =============================================================================
 class Variable:
     __array_priority__ = 200
 
@@ -20,15 +40,6 @@ class Variable:
         self.grad = None
         self.creator = None
         self.generation = 0
-
-    def __len__(self):
-        return len(self.data)
-
-    def __repr__(self):
-        if self.data is None:
-            return 'variable(None)'
-        p = str(self.data).replace('\n', '\n' + ' ' * 9)
-        return 'variable(' + p + ')'
 
     @property
     def shape(self):
@@ -45,6 +56,15 @@ class Variable:
     @property
     def dtype(self):
         return self.data.dtype
+
+    def __len__(self):
+        return len(self.data)
+
+    def __repr__(self):
+        if self.data is None:
+            return 'variable(None)'
+        p = str(self.data).replace('\n', '\n' + ' ' * 9)
+        return 'variable(' + p + ')'
 
     def set_creator(self, func):
         self.creator = func
@@ -70,7 +90,7 @@ class Variable:
 
         while funcs:
             f = funcs.pop()
-            gys = [output().grad for output in f.outputs]
+            gys = [output().grad for output in f.outputs]  # output is weakref
             gxs = f.backward(*gys)
             if not isinstance(gxs, tuple):
                 gxs = (gxs,)
@@ -82,13 +102,25 @@ class Variable:
                     x.grad = x.grad + gx
 
                 if x.creator is not None:
-                  add_func(x.creator)
+                    add_func(x.creator)
 
             if not retain_grad:
                 for y in f.outputs:
-                    y().grad = None
+                    y().grad = None  # y is weakref
 
-################## DZFs ##################
+
+def as_variable(obj):
+    if isinstance(obj, Variable):
+        return obj
+    return Variable(obj)
+
+
+def as_array(x):
+    if np.isscalar(x):
+        return np.array(x)
+    return x
+
+
 class Function:
     def __call__(self, *inputs):
         inputs = [as_variable(x) for x in inputs]
@@ -104,8 +136,8 @@ class Function:
             for output in outputs:
                 output.set_creator(self)
             self.inputs = inputs
+            self.outputs = [weakref.ref(output) for output in outputs]
 
-        self.outputs = [weakref.ref(output) for output in outputs]
         return outputs if len(outputs) > 1 else outputs[0]
 
     def forward(self, xs):
@@ -114,54 +146,38 @@ class Function:
     def backward(self, gys):
         raise NotImplementedError()
 
-class Square(Function):
-    def forward(self, x):
-        return x ** 2
 
-    def backward(self, gy):
-        x = self.inputs[0].data
-        gx = 2 * x * gy
-        return gx
-
-class Exp(Function):
-    def forward(self, x):
-        return np.exp(x)
-
-    def backward(self, gy):
-        x = self.input.data
-        return np.exp(x) * gy
-
+# =============================================================================
+# 四則演算 / 演算子のオーバーロード
+# =============================================================================
 class Add(Function):
     def forward(self, x0, x1):
-        return x0 + x1
+        y = x0 + x1
+        return y
 
     def backward(self, gy):
         return gy, gy
 
-class Sub(Function):
-    def forward(self, x0, x1):
-        return x0 - x1
 
-    def backward(self, gy):
-        return gy, -gy
+def add(x0, x1):
+    x1 = as_array(x1)
+    return Add()(x0, x1)
+
 
 class Mul(Function):
     def forward(self, x0, x1):
-        return x0 * x1
+        y = x0 * x1
+        return y
 
     def backward(self, gy):
         x0, x1 = self.inputs[0].data, self.inputs[1].data
-        return x1 * gy, x0 * gy
+        return gy * x1, gy * x0
 
-class Div(Function):
-    def forward(self, x0, x1):
-        return x0 / x1
 
-    def backward(self, gy):
-        x0, x1 = self.inputs[0].data, self.inputs[1].data
-        gx0 = gy * (1 / x1)
-        gx1 = gy * -(x0 / x1 ** 2)
-        return gx0, gx1
+def mul(x0, x1):
+    x1 = as_array(x1)
+    return Mul()(x0, x1)
+
 
 class Neg(Function):
     def forward(self, x):
@@ -170,93 +186,80 @@ class Neg(Function):
     def backward(self, gy):
         return -gy
 
-class Pow(Function):
-    def __init__(self, c):
-        self.c = c
 
-    def forward(self, x):
-        return x ** self.c
+def neg(x):
+    return Neg()(x)
 
-    def backward(self, gy):
-        x = self.inputs[0].data
-        c = self.c
-        return c * x ** (c - 1) * gy
 
-class Sin(Function):
-    def forward(self, x):
-        y = np.sin(x)
+class Sub(Function):
+    def forward(self, x0, x1):
+        y = x0 - x1
         return y
 
     def backward(self, gy):
-        x = self.inputs[0].data
-        gx = gy * np.cos(x)
-        return gx
+        return gy, -gy
 
-################## core functions ##################
-@contextlib.contextmanager
-def using_config(name, value):
-    old_value = getattr(Config, name)
-    setattr(Config, name, value)
-    try:
-        yield
-    finally:
-        setattr(Config, name, old_value)
-
-def no_grad():
-    return using_config('enable_backprop', False)
-
-def as_array(x):
-    if np.isscalar(x):
-        return np.array(x)
-    return x
-
-def as_variable(obj):
-    if isinstance(obj, Variable):
-        return obj
-    return Variable(obj)
-
-def add(x0, x1):
-    x1 = as_array(x1)
-    return Add()(x0, x1)
 
 def sub(x0, x1):
     x1 = as_array(x1)
     return Sub()(x0, x1)
 
+
 def rsub(x0, x1):
     x1 = as_array(x1)
     return Sub()(x1, x0)
 
-def mul(x0, x1):
-    x1 = as_array(x1)
-    return Mul()(x0, x1)
+
+class Div(Function):
+    def forward(self, x0, x1):
+        y = x0 / x1
+        return y
+
+    def backward(self, gy):
+        x0, x1 = self.inputs[0].data, self.inputs[1].data
+        gx0 = gy / x1
+        gx1 = gy * (-x0 / x1 ** 2)
+        return gx0, gx1
+
 
 def div(x0, x1):
     x1 = as_array(x1)
     return Div()(x0, x1)
 
+
 def rdiv(x0, x1):
     x1 = as_array(x1)
     return Div()(x1, x0)
 
-def neg(x0, x1):
-    x1 = as_array(x1)
-    return Neg()(x)
+
+class Pow(Function):
+    def __init__(self, c):
+        self.c = c
+
+    def forward(self, x):
+        y = x ** self.c
+        return y
+
+    def backward(self, gy):
+        x = self.inputs[0].data
+        c = self.c
+
+        gx = c * x ** (c - 1) * gy
+        return gx
+
 
 def pow(x, c):
     return Pow(c)(x)
 
-def sin(x):
-    return Sin()(x)
 
 def setup_variable():
-    Variable.__mul__ = mul
-    Variable.__rmul__ = mul
-    Variable.__truediv__ = div
-    Variable.__rtruediv__ = rdiv
     Variable.__add__ = add
     Variable.__radd__ = add
+    Variable.__mul__ = mul
+    Variable.__rmul__ = mul
+    Variable.__neg__ = neg
     Variable.__sub__ = sub
     Variable.__rsub__ = rsub
-    Variable.__neg__ = neg
+    Variable.__truediv__ = div
+    Variable.__rtruediv__ = rdiv
     Variable.__pow__ = pow
