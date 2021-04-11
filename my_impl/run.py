@@ -1,3 +1,6 @@
+from dezero.datasets import Spiral
+from dezero import DataLoader
+
 import math
 import numpy as np
 import dezero
@@ -6,53 +9,45 @@ import dezero.functions as F
 from dezero.models import MLP
 import matplotlib.pylab as plt
 
+batch_size = 10
 max_epoch = 300
-batch_size = 30
-hidden_size = 100
+hidden_size = 10
 lr = 1.0
 
-x, t = dezero.datasets.get_spiral(train=True)
+train_set = Spiral(train=True)
+test_set = Spiral(train=True)
+train_loader = DataLoader(train_set, batch_size)
+test_loader = DataLoader(test_set, batch_size, shuffle=False)
+
 model = MLP((hidden_size, 3))
 optimizer = optimizers.SGD(lr).setup(model)
 
-data_size = len(x)
-max_iter = math.ceil(data_size / batch_size)
-
-log_loss = []
-
 for epoch in range(max_epoch):
-    index = np.random.permutation(data_size)
-    sum_loss = 0
+    sum_loss, sum_acc = 0, 0
 
-    for i in range(max_iter):
-        batch_index = index[i * batch_size:(i + 1) * batch_size]
-        batch_x = x[batch_index]
-        batch_t = t[batch_index]
-
-        y = model(batch_x)
-        loss = F.softmax_cross_entropy(y, batch_t)
+    for x, t in train_loader:
+        y = model(x)
+        loss = F.softmax_cross_entropy(y, t)
+        acc = F.accuracy(y, t)
         model.cleargrads()
         loss.backward()
         optimizer.update()
 
-        sum_loss += float(loss.data) * len(batch_t)
+        sum_loss += float(loss.data) * len(t)
+        sum_acc += float(acc.data) * len(t)
 
-    avg_loss = sum_loss / data_size
-    print('epoch %d, loss %.2f' % (epoch + 1, avg_loss))
-    log_loss.append(avg_loss)
+    print('epoch: {}'.format(epoch+1))
+    print('train loss: {:.4f}, accuracy: {:.4f}'.format(
+        sum_loss / len(train_set), sum_acc / len(train_set)))
 
-data = np.random.randn(3000, 2)
-result = model(data)
+    sum_loss, sum_acc = 0, 0
+    with dezero.no_grad():
+        for x, t in test_loader:
+            y = model(x)
+            loss = F.softmax_cross_entropy(y, t)
+            acc = F.accuracy(y, t)
+            sum_loss =+ float(loss.data) * len(t)
+            sum_acc += float(acc.data) * len(t)
 
-answers = F.softmax(result).data.argmax(axis=1)
-
-markers = ['bo', 'ro', 'go']
-
-for i, a in enumerate(answers):
-    px = data[i][0]
-    py = data[i][1]
-    mk = markers[a]
-    if abs(px) <= 1.0 and abs(py) <= 1.0:
-        plt.plot(px, py, mk, markersize=20)
-
-plt.show()
+    print('test loss: {:.4f}, accuracy: {:.4f}'.format(
+        sum_loss / len(test_set), sum_acc /len(test_set)))
